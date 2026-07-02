@@ -49,6 +49,11 @@
       <pre>open local_outputs/daily_coach_report.html</pre>
     </div>
     <div class="step">
+      <div class="row"><h3>单独拉取免费行情快照</h3><button data-copy="python3 scripts/market_data_provider.py --quotes 301421,301171 -o local_outputs/market_data_snapshot.json --include-akshare-status">复制命令</button></div>
+      <pre>python3 scripts/market_data_provider.py --quotes 301421,301171 -o local_outputs/market_data_snapshot.json --include-akshare-status</pre>
+      <p class="muted">优先新浪指数/个股快照、全市场榜单和日 K，腾讯作为备用，东方财富作为增强源，AKShare 只检测是否可用。接口失败会写入 JSON，不硬编结论。</p>
+    </div>
+    <div class="step">
       <div class="row"><h3>更新冰冰小美宏观镜片</h3><button data-copy='python3 scripts/macro_lens_digest.py --source xueqiu --user-url "https://xueqiu.com/u/7143769715" --limit 50'>复制命令</button></div>
       <pre>python3 scripts/macro_lens_digest.py --source xueqiu --user-url "https://xueqiu.com/u/7143769715" --limit 50</pre>
       <p class="muted">手动触发联网读取；只保存标题、URL、摘要、宏观镜片和风险标签，不保存全文。</p>
@@ -72,7 +77,7 @@ python3 scripts/compute_metrics.py cleaned_trades.csv</pre>
     <details><summary>宏观博主观点会直接触发买卖吗？</summary><p>不会。宏观镜片只用于市场环境观察、教练解释和条件化反问。</p></details>
     <details><summary>我写的市场判断会被直接采用吗？</summary><p>不会。智能体会优先基于公开行情独立判断市场环境，再评价你的判断是否一致、过度归因或缺少证据。</p></details>
     <details><summary>懂哥和冰冰小美镜片会直接喊买卖吗？</summary><p>不会。它们只生成硬判断、条件买点、止损锚点、禁止动作和仓位频率约束，不输出确定性买卖建议。</p></details>
-    <details><summary>没有候选池会怎样？</summary><p>第一阶段不会硬编全市场候选。请粘贴强势榜、候选池或板块前排，否则报告明确写无法生成研究候选池。</p></details>
+    <details><summary>没有候选池会怎样？</summary><p>系统会先尝试免费公开行情快照；如果榜单、板块或 K 线接口不可用，就要求你粘贴强势榜、候选池或板块前排。缺少 200 日均线数据时，报告会明确标注未确认。</p></details>
     <details><summary>雪球发布版能直接发吗？</summary><p>它是脱敏草稿，仍建议你人工检查措辞，确认没有账户、资金余额或确定性买卖表达。</p></details>
     <details><summary>报告能作为买卖建议吗？</summary><p>不能。它只做历史复盘、行为诊断和风控训练。</p></details>
   </section>

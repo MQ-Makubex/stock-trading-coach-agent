@@ -90,7 +90,7 @@
       <textarea id="articleText" name="article_text" placeholder="可选。长期只保存观点摘要和叙事污染检查，不保存全文。"></textarea>
 
       <label for="candidatePool">候选池 / 强势榜文本</label>
-      <textarea id="candidatePool" name="candidate_pool_text" placeholder="可选。每行包含：证券代码 证券名称 题材/位置/量能/均线/止损线索。例如：301421 波长光电 科技 放量 回踩200日线 止损200日线。未填写时，报告会明确无法生成研究候选池，不会硬编股票。"></textarea>
+      <textarea id="candidatePool" name="candidate_pool_text" placeholder="可选。每行包含：证券代码 证券名称 题材/位置/量能/均线/止损线索。例如：301421 波长光电 科技 放量 回踩200日线 止损200日线。未填写时，系统会先尝试免费公开行情快照；若接口不可用，再明确要求手动粘贴候选池。"></textarea>
 
       <label for="plan">计划与复盘备注</label>
       <textarea id="plan" name="plan" placeholder="可选。写下原计划、退出条件、盘后复盘。"></textarea>
@@ -140,6 +140,7 @@
         <dt>隐私检查</dt><dd>${escapeText(data.privacy_status || "未完成")}</dd>
         <dt>粘贴解析 CSV</dt><dd><code>${escapeText(details.pasted_trades || "")}</code></dd>
         <dt>标准交易 CSV</dt><dd><code>${escapeText(details.cleaned_trades || "")}</code></dd>
+        <dt>行情快照</dt><dd><code>${escapeText(details.market_data || "")}</code></dd>
         <dt>市场环境</dt><dd><code>${escapeText(details.market_context || "")}</code></dd>
         <dt>双镜片判断</dt><dd><code>${escapeText(details.coach_lens || "")}</code></dd>
         <dt>研究候选池</dt><dd><code>${escapeText(details.candidate_pool || "")}</code></dd>

@@ -303,10 +303,19 @@ def candidate_pool_lines(candidate_pool):
         ]
     lines = [candidate_pool.get("message", "基于候选池生成研究预案。")]
     for item in candidate_pool.get("candidates", [])[:5]:
+        evidence = item.get("market_snapshot_evidence", {})
+        evidence_line = ""
+        if evidence:
+            evidence_line = (
+                f"｜行情证据：涨跌幅 {evidence.get('change_pct', '无法判断')}，成交额 {evidence.get('amount', '无法判断')}，"
+                f"换手 {evidence.get('turnover', '无法判断')}，量比 {evidence.get('volume_ratio', '无法判断')}。"
+                f"{evidence.get('note', '')}"
+            )
         lines.append(
             f"{item.get('security', '无法判断')}｜研究分数 {item.get('research_score', '无法判断')}｜{item.get('buy_point_type', '无法判断')}｜"
             f"触发：{item.get('trigger_condition', '无法判断')}｜止损：{item.get('stop_anchor', '无法判断')}｜"
             f"禁止：{item.get('forbidden_condition', '无法判断')}｜懂哥质疑：{item.get('dongge_challenge', '无法判断')}｜小美风险：{item.get('bingbing_risk', '无法判断')}"
+            f"{evidence_line}"
         )
     return lines
 
@@ -453,7 +462,7 @@ def to_html(report):
         section_html("dongge-lens", "懂哥短线镜片", "先环境、再题材、再个股、再买点；买点必须能写出失败条件。", report["dongge_lens"]),
         section_html("bingbing-lens", "冰冰小美宏观镜片", "宏观镜片只约束仓位和频率，不替代个股止损。", report["bingbing_lens"]),
         section_html("buy-point", "买点教练卡", "硬判断 + 条件句：分类、触发、止损、禁止动作必须同时出现。", report["stock_guidance"], "danger"),
-        section_html("candidate-pool", "研究候选池", "默认不硬编股票；没有联网候选或用户候选池时，明确无法生成。", report["candidate_pool"], "warning"),
+        section_html("candidate-pool", "研究候选池", "优先使用公开行情快照；接口失败或缺少 200 日均线数据时必须明说。", report["candidate_pool"], "warning"),
         section_html("single-stock", "单票复盘", "单票结果只代表历史成交，不证明模式已经可复制。", report["per_stock_review"]),
         section_html("t-trade", "T 交易分析", "正 T / 负 T 只用于复盘执行质量，不作为未来涨跌判断。", report["t_trade_analysis"], "danger" if any("负 T" in line for line in report["t_trade_analysis"]) else "neutral"),
         section_html("risk", "风险行为", "先处理最危险的行为标签，再谈下一笔机会。", report["risk_behaviors"], "danger"),

@@ -55,6 +55,7 @@ ALLOWED_CODEX_READ_FILES = [
     "pre_trade_guard.json",
     "macro_lenses.json",
     "source_articles_index.json",
+    "market_data_snapshot.json",
 ]
 
 SANITIZED_FIELDS = [
@@ -274,6 +275,22 @@ def load_privacy_summary(path):
 def read_csv_rows(path):
     with open(path, newline="", encoding="utf-8") as fh:
         return list(csv.DictReader(fh))
+
+
+def collect_security_codes(path):
+    codes = []
+    seen = set()
+    try:
+        rows = read_csv_rows(path)
+    except Exception:
+        return codes
+    for row in rows:
+        code = (row.get("security_code") or row.get("stock_code") or "").strip()
+        if not re.match(r"^[036]\d{5}$", code) or code in seen:
+            continue
+        seen.add(code)
+        codes.append(code)
+    return codes
 
 
 def write_csv_rows(path, rows, fieldnames=SANITIZED_FIELDS):
@@ -642,6 +659,7 @@ def process_coach_request(fields, uploads, output_dir, state_dir):
         playbooks = state_dir / "playbooks.json"
         playbooks_snapshot = run_dir / "playbooks.json"
         guard = run_dir / "pre_trade_guard.json"
+        market_data = run_dir / "market_data_snapshot.json"
         market_context = run_dir / "market_context.json"
         coach_lens = run_dir / "coach_lens.json"
         candidate_pool = run_dir / "candidate_pool.json"
@@ -666,18 +684,35 @@ def process_coach_request(fields, uploads, output_dir, state_dir):
         else:
             article_args.extend(["--text", ""])
 
+        trade_date = build_journal_input(fields).get("trade_date") or datetime.now().date().isoformat()
+        quote_codes = collect_security_codes(cleaned)
+        market_data_args = [
+            PYTHON,
+            str(SCRIPT_DIR / "market_data_provider.py"),
+            "-o",
+            str(market_data),
+            "--limit",
+            "120",
+            "--sector-limit",
+            "60",
+            "--include-akshare-status",
+        ]
+        if quote_codes:
+            market_data_args.extend(["--quotes", ",".join(quote_codes)])
+
         steps = [
             [PYTHON, str(SCRIPT_DIR / "compute_metrics.py"), str(cleaned), "-o", str(metrics)],
             [PYTHON, str(SCRIPT_DIR / "build_trade_lifecycle.py"), str(cleaned), "-o", str(lifecycle)],
             [PYTHON, str(SCRIPT_DIR / "detect_behavior_patterns.py"), str(cleaned), str(metrics), str(lifecycle), "-o", str(behavior)],
             [PYTHON, str(SCRIPT_DIR / "counterfactual_simulator.py"), str(metrics), str(lifecycle), "-o", str(counterfactual)],
             [PYTHON, str(SCRIPT_DIR / "daily_journal.py"), "--input-json", str(journal_input), "-o", str(journal)],
-            [PYTHON, str(SCRIPT_DIR / "market_context_analyzer.py"), "--trade-date", build_journal_input(fields).get("trade_date") or datetime.now().date().isoformat(), "--user-view", fields.get("market_view", ""), "-o", str(market_context)],
+            market_data_args,
+            [PYTHON, str(SCRIPT_DIR / "market_context_analyzer.py"), "--trade-date", trade_date, "--user-view", fields.get("market_view", ""), "--market-data", str(market_data), "-o", str(market_context)],
             article_args,
             [PYTHON, str(SCRIPT_DIR / "playbook_manager.py"), "--metrics", str(metrics), "--lifecycle", str(lifecycle), "--behavior", str(behavior), "--journal", str(journal), "--state", str(playbooks)],
             [PYTHON, str(SCRIPT_DIR / "pre_trade_guard.py"), "--playbooks", str(playbooks), "--behavior", str(behavior), "-o", str(guard)],
-            [PYTHON, str(SCRIPT_DIR / "coach_lens_analyzer.py"), "--metrics", str(metrics), "--lifecycle", str(lifecycle), "--behavior", str(behavior), "--journal", str(journal), "--market-context", str(market_context), "--macro-lenses", str(macro_lenses), "--playbooks", str(playbooks), "--dongge-distillation", str(state_dir / "dongge_weekend_fantang_distillation.md"), "--bingbing-distillation", str(state_dir / "bingbingxiaomei_macro_distillation.md"), "--prior-context", str(state_dir / f"intraday_journal_{build_journal_input(fields).get('trade_date') or datetime.now().date().isoformat()}.md"), "-o", str(coach_lens)],
-            [PYTHON, str(SCRIPT_DIR / "candidate_pool_analyzer.py"), "--market-context", str(market_context), "--candidate-text-file", str(candidate_text_path), "-o", str(candidate_pool)],
+            [PYTHON, str(SCRIPT_DIR / "coach_lens_analyzer.py"), "--metrics", str(metrics), "--lifecycle", str(lifecycle), "--behavior", str(behavior), "--journal", str(journal), "--market-context", str(market_context), "--macro-lenses", str(macro_lenses), "--playbooks", str(playbooks), "--dongge-distillation", str(state_dir / "dongge_weekend_fantang_distillation.md"), "--bingbing-distillation", str(state_dir / "bingbingxiaomei_macro_distillation.md"), "--prior-context", str(state_dir / f"intraday_journal_{trade_date}.md"), "-o", str(coach_lens)],
+            [PYTHON, str(SCRIPT_DIR / "candidate_pool_analyzer.py"), "--market-context", str(market_context), "--market-data", str(market_data), "--candidate-text-file", str(candidate_text_path), "-o", str(candidate_pool)],
             [PYTHON, str(SCRIPT_DIR / "generate_coach_report.py"), "--metrics", str(metrics), "--lifecycle", str(lifecycle), "--behavior", str(behavior), "--journal", str(journal), "--article", str(article), "--playbooks", str(playbooks), "--guard", str(guard), "--macro-lenses", str(macro_lenses), "--market-context", str(market_context), "--coach-lens", str(coach_lens), "--candidate-pool", str(candidate_pool), "--json-output", str(coach_json), "--markdown-output", str(coach_md), "--html-output", str(coach_html), "--xueqiu-markdown-output", str(xueqiu_md), "--xueqiu-html-output", str(xueqiu_html)],
         ]
         try:
@@ -708,6 +743,7 @@ def process_coach_request(fields, uploads, output_dir, state_dir):
             "pasted_trades": str(run_dir / "pasted_trades_extracted.csv") if pasted_text else "",
             "daily_journal": str(journal),
             "article_digest": str(article),
+            "market_data": str(market_data),
             "market_context": str(market_context),
             "coach_lens": str(coach_lens),
             "candidate_pool": str(candidate_pool),

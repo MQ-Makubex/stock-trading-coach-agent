@@ -130,6 +130,128 @@ def risk_appetite(text, regime):
     return "无法判断"
 
 
+def load_json(path, default):
+    if not path or not Path(path).exists():
+        return default
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception:
+        return default
+
+
+def format_pct(value):
+    if isinstance(value, (int, float)):
+        return f"{value:+.2f}%"
+    return "无法判断"
+
+
+def format_amount(value):
+    if isinstance(value, (int, float)):
+        if abs(value) >= 100000000:
+            return f"{value / 100000000:.1f}亿"
+        return f"{value:.0f}"
+    return "无法判断"
+
+
+def format_index_line(item):
+    name = item.get("name") or item.get("code") or "指数"
+    return (
+        f"{name} 收 {item.get('price', '无法判断')}，涨跌幅 {format_pct(item.get('change_pct'))}，"
+        f"成交额 {format_amount(item.get('amount'))}，时间 {item.get('date', '')} {item.get('time', '')}".strip()
+    )
+
+
+def format_sector_line(item):
+    name = item.get("sector_name") or item.get("stock_name") or item.get("name") or item.get("stock_code") or "未知方向"
+    return f"{name} {format_pct(item.get('change_pct'))}"
+
+
+def infer_style_from_snapshot(snapshot):
+    names = " ".join(
+        [item.get("sector_name", "") for item in snapshot.get("sector_strength", [])[:12]]
+        + [item.get("stock_name", "") for item in snapshot.get("top_change", [])[:20]]
+    )
+    return classify_style(names)
+
+
+def infer_regime_from_snapshot(snapshot):
+    indices = {item.get("name"): item for item in snapshot.get("indices", [])}
+    changes = [item.get("change_pct") for item in snapshot.get("indices", []) if isinstance(item.get("change_pct"), (int, float))]
+    if not changes:
+        return "无法判断"
+    avg_change = sum(changes) / len(changes)
+    sh = indices.get("上证指数", {}).get("change_pct")
+    cyb = indices.get("创业板指", {}).get("change_pct")
+    kc = indices.get("科创50", {}).get("change_pct")
+    if avg_change <= -1.5:
+        return "普跌"
+    if isinstance(cyb, (int, float)) and isinstance(kc, (int, float)) and isinstance(sh, (int, float)):
+        if cyb < sh - 1.0 and kc < sh - 1.0:
+            return "杀高弹性"
+    if max(changes) > 0 and min(changes) < 0:
+        return "震荡"
+    if avg_change >= 1.0:
+        return "修复"
+    if avg_change >= 0.2:
+        return "强趋势"
+    return "震荡"
+
+
+def infer_risk_from_snapshot(snapshot, regime):
+    if regime in {"普跌", "杀高弹性"}:
+        return "低"
+    if regime == "震荡":
+        return "中"
+    if regime in {"修复", "强趋势"}:
+        return "中高"
+    return "无法判断"
+
+
+def build_from_market_data(args, snapshot):
+    user_view = args.user_view or ""
+    indices = snapshot.get("indices", [])
+    verified = bool(snapshot.get("network_verified") and indices)
+    regime = infer_regime_from_snapshot(snapshot) if verified else "无法判断"
+    style = infer_style_from_snapshot(snapshot) if verified else "无法判断"
+    appetite = infer_risk_from_snapshot(snapshot, regime) if verified else "无法判断"
+    provider_messages = [
+        f"{item.get('provider')}: {'OK' if item.get('ok') else 'FAIL'} {item.get('message', '')}"
+        for item in snapshot.get("provider_status", [])
+    ]
+    if verified:
+        coach_view = f"公开行情快照显示市场更接近“{regime}”，风格偏向“{style}”，风险偏好为“{appetite}”。"
+    else:
+        coach_view = "市场背景未联网验证，不能把用户判断直接当成事实。"
+    agreement, correction = compare_user_view(user_view, coach_view, regime, style)
+    if verified and regime in {"杀高弹性", "普跌"}:
+        implication = "弱环境下，成长股低吸和做 T 需要更强确认；不是价格便宜就能试错。"
+    elif verified and regime == "震荡":
+        implication = "震荡环境下，临盘追涨和频繁切换容易被波动消耗，需降低交易频率。"
+    elif verified and regime in {"修复", "强趋势"}:
+        implication = "修复或趋势环境可以观察强弱分化，但仍需按失败条件控制仓位。"
+    else:
+        implication = "无法判断；缺少可靠市场背景时，应降低对宏观叙事的依赖。"
+    return {
+        "trade_date": args.trade_date,
+        "network_verified": verified,
+        "source_url": "market_data_snapshot.json",
+        "fetch_error": "" if verified else "行情快照不足；" + "；".join(provider_messages[:4]),
+        "major_indices": [format_index_line(item) for item in indices] or ["无法判断"],
+        "sector_strength": [format_sector_line(item) for item in snapshot.get("sector_strength", [])[:8]] or [format_sector_line(item) for item in snapshot.get("top_change", [])[:8]] or ["无法判断"],
+        "sector_weakness": [format_sector_line(item) for item in snapshot.get("sector_weakness", [])[:8]] or ["无法判断"],
+        "style_bias": style,
+        "risk_appetite": appetite,
+        "market_regime": regime,
+        "coach_view": coach_view,
+        "user_view": user_view or "无法判断",
+        "agreement": agreement,
+        "correction": correction,
+        "trading_implication": implication,
+        "provider_status": snapshot.get("provider_status", []),
+        "storage_policy": "只保存公开行情摘要、接口状态和纠偏判断，不保存网页全文。",
+    }
+
+
 def compare_user_view(user_view, coach_view, regime, style):
     if not user_view.strip():
         return "无法判断", "用户未提供市场判断。"
@@ -152,6 +274,10 @@ def compare_user_view(user_view, coach_view, regime, style):
 
 def build_context(args):
     user_view = args.user_view or ""
+    snapshot = load_json(args.market_data, {}) if getattr(args, "market_data", "") else {}
+    if snapshot:
+        return build_from_market_data(args, snapshot)
+
     market_text, source_url, error = search_market_text(args.trade_date)
     verified = has_useful_market_evidence(market_text)
     combined = market_text
@@ -204,6 +330,7 @@ def main():
     parser.add_argument("--trade-date", default=date.today().isoformat())
     parser.add_argument("--user-view", default="")
     parser.add_argument("--article-url", action="append", default=[])
+    parser.add_argument("--market-data", default="", help="market_data_provider.py 生成的行情快照。")
     parser.add_argument("-o", "--output", default="market_context.json")
     args = parser.parse_args()
 
