@@ -224,6 +224,8 @@ def qualitative(summary, behavior, journal, digest):
         return "交易纪律需要继续观察，文章观点可能强化了持仓偏见。"
     pnl = summary.get("realized_pnl")
     if isinstance(pnl, (int, float)) and pnl >= 0:
+        if abs(pnl) < 1e-9:
+            return "已实现盈亏为 0 或无法完整匹配成本，不能把结果解读为盈利。"
         return "今日交易结果为正，但仍需验证模式是否可重复且风险可控。"
     if isinstance(pnl, (int, float)) and pnl < 0:
         return "今日交易结果为负，应优先复盘风险暴露和退出纪律。"

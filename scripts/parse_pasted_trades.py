@@ -38,7 +38,7 @@ def norm(value):
 def split_line(line):
     line = line.strip()
     if "\t" in line:
-        return [cell.strip() for cell in line.split("\t")]
+        return [cell.strip() for cell in line.split("\t") if cell.strip()]
     return [cell.strip() for cell in re.split(r"\s{2,}", line) if cell.strip()]
 
 
