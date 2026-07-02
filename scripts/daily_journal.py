@@ -18,6 +18,7 @@ def build_journal(args):
         "trade_date": payload.get("trade_date") or args.trade_date or date.today().isoformat(),
         "trading_idea": payload.get("trading_idea") or args.trading_idea or "",
         "trade_intent": payload.get("trade_intent") or args.trade_intent or "",
+        "market_view": payload.get("market_view") or args.market_view or "",
         "mood": payload.get("mood") or args.mood or "",
         "plan": payload.get("plan") or args.plan or "",
         "review_note": payload.get("review_note") or args.review_note or "",
@@ -33,6 +34,7 @@ def main():
     parser.add_argument("--trade-date", default="")
     parser.add_argument("--trading-idea", default="")
     parser.add_argument("--trade-intent", default="")
+    parser.add_argument("--market-view", default="")
     parser.add_argument("--mood", default="")
     parser.add_argument("--plan", default="")
     parser.add_argument("--review-note", default="")

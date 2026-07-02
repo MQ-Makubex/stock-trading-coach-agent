@@ -29,14 +29,20 @@
     <p class="muted">这是静态命令向导。默认入口是本地每日教练页面，不上传服务器。</p>
   </section>
 
-  <p class="alert">真实 PDF、CSV、XLSX 只在本机处理。截图成交单只有在你显式发给 Codex 识别时才由 AI 读取；请先裁剪或打码敏感信息。</p>
+    <p class="alert">默认方式是复制粘贴当天交割单文本。真实 PDF、CSV、XLSX 只作为可选本地入口。截图成交单降级为备用能力，只有在你显式发给 Codex 识别时才由 AI 读取；请先裁剪或打码敏感信息。</p>
 
   <section>
     <h2>推荐流程</h2>
     <div class="step">
       <div class="row"><h3>启动每日教练页面</h3><button data-copy="python3 scripts/interactive_runner.py --open">复制命令</button></div>
       <pre>python3 scripts/interactive_runner.py --open</pre>
-      <p class="muted">打开 http://127.0.0.1:8787，上传交易文件，填写交易想法和文章信息。</p>
+      <p class="muted">打开 http://127.0.0.1:8787，粘贴今日交割单文本，填写交易想法、市场判断、文章信息和情绪标签。</p>
+    </div>
+    <div class="step">
+      <div class="row"><h3>粘贴文本格式示例</h3><button data-copy="序号\t成交时间\t证券代码\t证券名称\t委托方向\t成交数量\t成交价格\t成交金额\n1\t09:40:15\t301171\t易点天下\t证券买入\t1500\t34.900\t52350.000">复制示例</button></div>
+      <pre>序号    成交时间    证券代码    证券名称    委托方向    成交数量    成交价格    成交金额
+1       09:40:15    301171     易点天下    证券买入    1500      34.900      52350.000</pre>
+      <p class="muted">脚本会解析为 pasted_trades_extracted.csv，然后继续走隐私检查和标准化解析。</p>
     </div>
     <div class="step">
       <div class="row"><h3>查看稳定报告入口</h3><button data-copy="open local_outputs/daily_coach_report.html">复制命令</button></div>
@@ -64,6 +70,7 @@ python3 scripts/compute_metrics.py cleaned_trades.csv</pre>
     <details><summary>playbook 为什么不会一次成功就可复制？</summary><p>为了避免结果偏差，至少 3 次类似证据后才升级为可复制；亏损或风险失控模式会进入应避免。</p></details>
     <details><summary>文章会保存全文吗？</summary><p>不会。只保存 URL、标题、观点摘要和叙事污染检查。</p></details>
     <details><summary>宏观博主观点会直接触发买卖吗？</summary><p>不会。宏观镜片只用于市场环境观察、教练解释和条件化反问。</p></details>
+    <details><summary>我写的市场判断会被直接采用吗？</summary><p>不会。智能体会优先基于公开行情独立判断市场环境，再评价你的判断是否一致、过度归因或缺少证据。</p></details>
     <details><summary>雪球发布版能直接发吗？</summary><p>它是脱敏草稿，仍建议你人工检查措辞，确认没有账户、资金余额或确定性买卖表达。</p></details>
     <details><summary>报告能作为买卖建议吗？</summary><p>不能。它只做历史复盘、行为诊断和风控训练。</p></details>
   </section>

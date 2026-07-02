@@ -13,8 +13,10 @@ description: Daily Chinese stock trading coach agent for user-provided historica
 
 ## 输入文件
 
-- 支持 `.pdf`、`.csv`、`.xlsx`、`.xlsm` 交易文件；PDF 继续本地脱敏，CSV/XLSX 只在本机临时目录解析。
+- 默认输入是“复制粘贴当天交割单文本”。用户可从券商成交记录页面复制表格文本粘贴，本地解析为 `pasted_trades_extracted.csv`。
+- 支持 `.pdf`、`.csv`、`.xlsx`、`.xlsm` 交易文件作为可选入口；PDF 继续本地脱敏，CSV/XLSX 只在本机临时目录解析。
 - 支持当天交易想法、交易意图、情绪状态、计划与复盘备注。
+- 支持用户填写“我对今日市场的判断”；该判断只作为待校正输入，智能体必须独立判断市场环境并评价用户判断。
 - 支持文章 URL 或粘贴文章文本；URL 可联网抓取，但长期只保存摘要和叙事污染检查，不保存全文。
 - 支持手动更新宏观镜片，例如冰冰小美雪球主页；宏观镜片只用于市场环境观察和教练提问。
 - 截图成交单仅在用户显式上传给 Codex 识别时使用 AI 抽取标准 trades；建议先裁剪或打码身份、账号、资金余额。
@@ -22,13 +24,14 @@ description: Daily Chinese stock trading coach agent for user-provided historica
 ## 工作流
 
 1. 本地交互：`python3 scripts/interactive_runner.py --open`
-2. 上传一个或多个交易文件，填写交易想法和文章信息。
+2. 粘贴今日交割单文本，填写交易想法、市场判断、文章信息和情绪标签。
 3. 本地完成隐私检查、标准化解析、交易统计、行为诊断和反事实模拟。
-4. 生成 `daily_journal.json`、`article_digest.json`、`pre_trade_guard.json`。
+4. 生成 `daily_journal.json`、`article_digest.json`、`market_context.json`、`pre_trade_guard.json`。
 5. 保守更新 `local_state/playbooks.json`。
-6. 读取可选 `local_state/macro_lenses.json`，生成市场情况判断和教练判断理由。
-7. 生成 `daily_coach_report.json`、`daily_coach_report.md`、`daily_coach_report.html`。
-8. 生成用于雪球发布的 `daily_xueqiu_post.md`、`daily_xueqiu_post.html`。
+6. 智能体优先基于公开行情信息独立判断市场环境；联网失败时标注“市场背景未联网验证”。
+7. 读取可选 `local_state/macro_lenses.json`，生成市场情况判断、用户判断校正和教练判断理由。
+8. 生成 `daily_coach_report.json`、`daily_coach_report.md`、`daily_coach_report.html`。
+9. 生成用于雪球发布的 `daily_xueqiu_post.md`、`daily_xueqiu_post.html`。
 
 手动更新宏观镜片：
 
@@ -60,12 +63,14 @@ python3 scripts/macro_lens_digest.py --source xueqiu --user-url "https://xueqiu.
 ## 输出文件
 
 - `cleaned_trades.csv`
+- `pasted_trades_extracted.csv`
 - `metrics.json`
 - `trade_lifecycle.json`
 - `behavior_flags.json`
 - `counterfactual_report.json`
 - `daily_journal.json`
 - `article_digest.json`
+- `market_context.json`
 - `pre_trade_guard.json`
 - `daily_coach_report.json`
 - `daily_coach_report.md`
@@ -92,7 +97,8 @@ python3 scripts/macro_lens_digest.py --source xueqiu --user-url "https://xueqiu.
 - 不预测未来涨跌。
 - 不输出买入、卖出或持有某只股票的建议。
 - 明日计划必须写成条件触发式纪律，不能写确定性动作。
-- 市场情况判断必须给出理由，说明依据来自成交事实、用户 journal、文章观点或宏观镜片；证据不足时写 `无法判断`。
+- 市场情况判断必须以智能体独立校验为主，用户判断只作为待校正输入；证据不足时写 `无法判断` 或“市场背景未联网验证”。
+- 用户市场判断必须被专业评价：哪些对、哪些过度归因、缺少哪些信息、对应交易动作应如何更保守。
 - 所有结论必须基于用户提供的历史成交、当天想法和文章观点。
 - 数据不足时必须写 `无法判断`。
 - 稳定盈利定义为寻找可重复、可验证、风险可控的交易模式，而不是预测未来。

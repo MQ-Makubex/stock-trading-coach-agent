@@ -89,11 +89,21 @@ def macro_lens_lines(macro_lenses):
 
 
 def journal_text(journal):
-    fields = ["trading_idea", "trade_intent", "plan", "review_note", "mood"]
+    fields = ["trading_idea", "trade_intent", "market_view", "plan", "review_note", "mood"]
     return "\n".join(str(journal.get(field, "") or "") for field in fields)
 
 
-def market_context_lines(journal, digest, macro_lenses):
+def market_context_lines(journal, digest, macro_lenses, market_context=None):
+    market_context = market_context or {}
+    if market_context:
+        lines = [
+            f"智能体独立判断：{market_context.get('coach_view', '无法判断')}",
+            f"市场状态：{market_context.get('market_regime', '无法判断')}；风格偏向：{market_context.get('style_bias', '无法判断')}；风险偏好：{market_context.get('risk_appetite', '无法判断')}",
+            f"交易影响：{market_context.get('trading_implication', '无法判断')}",
+        ]
+        if not market_context.get("network_verified"):
+            lines.insert(0, "市场背景未联网验证，不能把用户判断直接当成结论。")
+        return lines
     text = journal_text(journal)
     lines = []
     if any(word in text for word in ["大盘", "指数", "上涨", "回调", "市场", "风格"]):
@@ -112,6 +122,51 @@ def market_context_lines(journal, digest, macro_lenses):
         first = lenses[0]
         lines.append(f"宏观镜片提醒：{first.get('lens', '宏观观察')} - {first.get('observation', '无法判断')}")
     return lines or ["无法判断"]
+
+
+def market_correction_lines(market_context):
+    if not market_context:
+        return ["无法判断：未生成 market_context.json。"]
+    user_view = market_context.get("user_view") or "无法判断"
+    lines = [
+        f"你的原始判断：{user_view}",
+        f"一致性：{market_context.get('agreement', '无法判断')}",
+        f"需要校正：{market_context.get('correction', '无法判断')}",
+    ]
+    if market_context.get("major_indices"):
+        lines.append("指数证据：" + "；".join(market_context.get("major_indices", [])[:2]))
+    if market_context.get("sector_strength"):
+        lines.append("强势方向：" + "；".join(market_context.get("sector_strength", [])[:2]))
+    if market_context.get("sector_weakness"):
+        lines.append("弱势方向：" + "；".join(market_context.get("sector_weakness", [])[:2]))
+    lines.append("教练要求：用户判断只能作为待校正输入，不能直接作为买卖理由。")
+    return lines
+
+
+def t_trade_lines(lifecycle):
+    rows = []
+    for code, item in lifecycle.items():
+        events = item.get("events", [])
+        by_date = {}
+        for event in events:
+            by_date.setdefault(event.get("date", ""), []).append(event)
+        for day, day_events in by_date.items():
+            buys = [e for e in day_events if e.get("side") == "BUY"]
+            sells = [e for e in day_events if e.get("side") == "SELL"]
+            if not buys or not sells:
+                continue
+            buy_qty = sum(float(e.get("quantity") or 0) for e in buys)
+            sell_qty = sum(float(e.get("quantity") or 0) for e in sells)
+            buy_amt = sum(float(e.get("amount") or 0) for e in buys)
+            sell_amt = sum(float(e.get("amount") or 0) for e in sells)
+            avg_buy = buy_amt / buy_qty if buy_qty else 0
+            avg_sell = sell_amt / sell_qty if sell_qty else 0
+            result = "正 T" if avg_sell > avg_buy else "负 T" if avg_sell < avg_buy else "无法判断"
+            label = security_label(code, item)
+            rows.append(
+                f"{label} {day}：买入均价 {avg_buy:.3f}，卖出均价 {avg_sell:.3f}，标记为{result}。A 股 T+1 下，同日卖出通常对应原有可卖持仓，需结合底仓判断。"
+            )
+    return rows or ["未发现同日同票买卖；T 交易无法判断。"]
 
 
 def coach_reason_lines(summary, behavior, journal, digest, macro_lenses):
@@ -155,7 +210,7 @@ def tomorrow_plan_lines(journal, behavior, playbooks, guard):
         lines.append(f"买前反问：{question}")
     if not lines:
         lines.extend(discipline_lines(behavior, playbooks, guard))
-    return lines or ["无法判断"]
+    return (lines or ["无法判断"])[:3]
 
 
 def qualitative(summary, behavior, journal, digest):
@@ -198,15 +253,28 @@ def reusable_mode(playbooks):
     return ["无法判断"]
 
 
-def build_report(metrics, lifecycle, behavior, journal, digest, playbooks, guard, macro_lenses=None):
+def primary_behavior_tag(behavior):
+    triggered = [
+        name for name, item in behavior.get("behavior_flags", {}).items()
+        if item.get("status") == "触发"
+    ]
+    return triggered[0] if triggered else "无明显触发"
+
+
+def build_report(metrics, lifecycle, behavior, journal, digest, playbooks, guard, macro_lenses=None, market_context=None):
     macro_lenses = macro_lenses or {}
+    market_context = market_context or {}
     summary = metrics.get("summary", {})
     per_stock = metrics.get("per_stock_pnl", {})
     tomorrow_plan = tomorrow_plan_lines(journal, behavior, playbooks, guard)
     payload = {
         "scope": "只做历史复盘、行为诊断和风控训练；不荐股、不预测涨跌、不输出买卖建议。",
         "trade_date": journal.get("trade_date", "无法判断"),
-        "market_context": market_context_lines(journal, digest, macro_lenses),
+        "market_context": market_context_lines(journal, digest, macro_lenses, market_context),
+        "market_correction": market_correction_lines(market_context),
+        "market_regime": market_context.get("market_regime", "无法判断"),
+        "risk_appetite": market_context.get("risk_appetite", "无法判断"),
+        "primary_behavior_tag": primary_behavior_tag(behavior),
         "today_facts": [
             f"总交易次数：{summary.get('total_trades', '无法判断')}",
             f"买入次数：{summary.get('buy_count', '无法判断')}",
@@ -215,6 +283,7 @@ def build_report(metrics, lifecycle, behavior, journal, digest, playbooks, guard
             f"总费用：{money(summary.get('total_fees'))}",
         ],
         "per_stock_review": top_stock_lines(per_stock),
+        "t_trade_analysis": t_trade_lines(lifecycle),
         "today_intent": [
             f"交易想法：{journal.get('trading_idea') or '无法判断'}",
             f"交易意图：{journal.get('trade_intent') or '无法判断'}",
@@ -251,8 +320,10 @@ def to_markdown(report):
         "# 每日交易教练报告\n",
         f"> {report['scope']}\n",
         markdown_section("市场情况判断", report["market_context"]),
+        markdown_section("市场判断校正", report["market_correction"]),
         markdown_section("今日交易事实", report["today_facts"]),
         markdown_section("单票动作复盘", report["per_stock_review"]),
+        markdown_section("T 交易分析", report["t_trade_analysis"]),
         markdown_section("今日交易意图", report["today_intent"]),
         markdown_section("今日定性", [report["today_qualitative"]]),
         markdown_section("教练判断理由", report["coach_reasoning"]),
@@ -271,23 +342,47 @@ def list_html(lines):
     return "<ul>" + "".join(f"<li>{e(line)}</li>" for line in lines) + "</ul>"
 
 
+def badge(text, kind="neutral"):
+    return f'<span class="badge {e(kind)}">{e(text)}</span>'
+
+
+def section_html(anchor, title, conclusion, lines, tone="neutral"):
+    return (
+        f'<section id="{e(anchor)}" class="report-section {e(tone)}">'
+        f"<h2>{e(title)}</h2>"
+        f'<p class="section-lead">{e(conclusion)}</p>'
+        f"{list_html(lines)}"
+        "</section>"
+    )
+
+
 def to_html(report):
-    blocks = [
-        ("市场情况判断", list_html(report["market_context"])),
-        ("今日交易事实", list_html(report["today_facts"])),
-        ("单票动作复盘", list_html(report["per_stock_review"])),
-        ("今日交易意图", list_html(report["today_intent"])),
-        ("今日定性", f"<p class=\"qualitative\">{e(report['today_qualitative'])}</p>"),
-        ("教练判断理由", list_html(report["coach_reasoning"])),
-        ("做得好的地方", list_html(report["done_well"])),
-        ("风险行为", list_html(report["risk_behaviors"])),
-        ("文章观点影响", list_html(report["article_influence"])),
-        ("宏观镜片", list_html(report["macro_lens"])),
-        ("明日交易纪律", list_html(report["tomorrow_discipline"])),
-        ("是否形成可复用交易模式", list_html(report["reusable_mode"])),
-        ("雪球发布版草稿", list_html(report["xueqiu_post"]["lines"])),
+    nav = [
+        ("facts", "今日交易事实"),
+        ("market-correction", "市场判断校正"),
+        ("single-stock", "单票复盘"),
+        ("t-trade", "T 交易分析"),
+        ("risk", "风险行为"),
+        ("article", "文章观点影响"),
+        ("playbook", "Playbook 更新"),
+        ("discipline", "明日纪律"),
     ]
-    sections = "\n".join(f"<section><h2>{e(title)}</h2>{body}</section>" for title, body in blocks)
+    facts_rows = "".join(
+        f"<tr><td>{e(line.split('：', 1)[0])}</td><td>{e(line.split('：', 1)[1] if '：' in line else line)}</td></tr>"
+        for line in report["today_facts"]
+    )
+    sections = "\n".join([
+        section_html("facts", "今日交易事实", "先看成交事实，再讨论动机和市场叙事。", report["today_facts"]),
+        section_html("market-correction", "市场判断校正", "市场环境由智能体独立判断，用户判断只作为待校正输入。", report["market_correction"], "warning"),
+        section_html("single-stock", "单票复盘", "单票结果只代表历史成交，不证明模式已经可复制。", report["per_stock_review"]),
+        section_html("t-trade", "T 交易分析", "正 T / 负 T 只用于复盘执行质量，不作为未来涨跌判断。", report["t_trade_analysis"], "danger" if any("负 T" in line for line in report["t_trade_analysis"]) else "neutral"),
+        section_html("risk", "风险行为", "先处理最危险的行为标签，再谈下一笔机会。", report["risk_behaviors"], "danger"),
+        section_html("article", "文章观点影响", "文章只能提供假设，不能替代盘面验证和止损规则。", report["article_influence"], "warning"),
+        section_html("playbook", "Playbook 更新", "少于 3 次类似证据的模式只能待验证，不能升级为可复制。", report["reusable_mode"]),
+        section_html("discipline", "明日纪律", "明日纪律最多 3 条，必须可执行、可验证、可复盘。", report["tomorrow_discipline"], "positive"),
+    ])
+    nav_html = "".join(f'<a href="#{e(anchor)}">{e(label)}</a>' for anchor, label in nav)
+    tomorrow_unique = report["tomorrow_discipline"][0] if report["tomorrow_discipline"] else "无法判断"
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -295,28 +390,97 @@ def to_html(report):
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>每日交易教练报告</title>
   <style>
-    :root {{ --ink:#17202a; --muted:#667085; --line:#d7dee8; --panel:#f8fafc; --accent:#0f766e; --danger:#b42318; }}
-    body {{ margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; color:var(--ink); background:#fff; line-height:1.65; }}
-    main {{ max-width:980px; margin:0 auto; padding:32px 20px 56px; }}
-    header {{ border-bottom:1px solid var(--line); padding-bottom:18px; margin-bottom:20px; }}
-    h1 {{ margin:0 0 8px; font-size:30px; }}
-    h2 {{ font-size:21px; margin:28px 0 10px; }}
-    section {{ border-bottom:1px solid var(--line); padding-bottom:16px; }}
-    ul {{ padding-left:22px; }}
-    li {{ margin:7px 0; }}
-    .note {{ color:var(--muted); }}
-    .qualitative {{ border-left:4px solid var(--accent); background:var(--panel); padding:12px 14px; }}
-    .danger {{ color:var(--danger); }}
+    :root {{
+      --ink:#111827; --muted:#667085; --line:#d7dee8; --paper:#f7f3ea; --panel:#fffdf8;
+      --accent:#0f766e; --danger:#b42318; --danger-bg:#fff1f0; --ok:#067647; --ok-bg:#ecfdf3;
+      --warn:#b54708; --warn-bg:#fffaeb; --dark:#111827;
+    }}
+    * {{ box-sizing:border-box; }}
+    html {{ scroll-behavior:smooth; }}
+    body {{
+      margin:0; font-family:Geist,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      color:var(--ink); background:
+        radial-gradient(circle at 8% 0%, rgba(15,118,110,.18), transparent 28%),
+        radial-gradient(circle at 85% 10%, rgba(180,35,24,.12), transparent 26%),
+        linear-gradient(180deg,#fbfaf6 0%,#f4efe5 100%);
+      line-height:1.68;
+    }}
+    main {{ width:100%; max-width:1180px; margin:0 auto; padding:28px 18px 72px; }}
+    .topnav {{
+      position:sticky; top:14px; z-index:10; display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:center;
+      width:min(980px, calc(100vw - 28px)); margin:0 auto 44px; padding:10px; border:1px solid rgba(17,24,39,.12);
+      border-radius:999px; background:rgba(255,253,248,.86); backdrop-filter:blur(16px); box-shadow:0 18px 60px rgba(17,24,39,.08);
+    }}
+    .topnav a {{ color:#344054; text-decoration:none; font-size:13px; padding:7px 10px; border-radius:999px; }}
+    .topnav a:hover {{ background:#111827; color:#fff; }}
+    .hero {{ display:grid; grid-template-columns:minmax(0,1.15fr) minmax(260px,.85fr); gap:34px; align-items:end; padding:42px 0 56px; }}
+    h1 {{ max-width:1120px; margin:0; font-size:clamp(34px,5vw,72px); line-height:1.04; letter-spacing:0; }}
+    .hero p {{ color:#475467; font-size:17px; max-width:620px; }}
+    .hero-panel {{ border:1px solid rgba(17,24,39,.12); border-radius:22px; padding:22px; background:rgba(255,255,255,.72); box-shadow:0 24px 70px rgba(17,24,39,.10); }}
+    .bento {{ display:grid; grid-template-columns:repeat(12,1fr); grid-auto-flow:dense; gap:14px; margin:14px 0 56px; }}
+    .card {{ border:1px solid rgba(17,24,39,.10); border-radius:20px; background:var(--panel); padding:18px; min-height:132px; transition:transform .45s ease, box-shadow .45s ease; overflow:hidden; }}
+    .card:hover {{ transform:translateY(-3px); box-shadow:0 20px 60px rgba(17,24,39,.10); }}
+    .span-6 {{ grid-column:span 6; }} .span-3 {{ grid-column:span 3; }} .span-4 {{ grid-column:span 4; }} .span-8 {{ grid-column:span 8; }}
+    .eyebrow {{ color:#667085; font-size:12px; margin:0 0 8px; }}
+    .value {{ font-size:22px; line-height:1.25; margin:0; font-weight:760; }}
+    .badge {{ display:inline-flex; align-items:center; border-radius:999px; padding:4px 9px; font-size:12px; font-weight:700; border:1px solid rgba(17,24,39,.10); }}
+    .badge.danger {{ color:var(--danger); background:var(--danger-bg); }} .badge.positive {{ color:var(--ok); background:var(--ok-bg); }}
+    .badge.warning {{ color:var(--warn); background:var(--warn-bg); }} .badge.neutral {{ color:#344054; background:#f2f4f7; }}
+    .layout {{ display:grid; grid-template-columns:240px minmax(0,1fr); gap:30px; align-items:start; }}
+    .toc {{ position:sticky; top:92px; border-left:1px solid var(--line); padding-left:14px; }}
+    .toc a {{ display:block; color:#475467; text-decoration:none; margin:0 0 10px; font-size:14px; }}
+    .toc a:hover {{ color:#111827; }}
+    .report-section {{ margin:0 0 26px; padding:24px; border:1px solid rgba(17,24,39,.10); border-radius:22px; background:rgba(255,253,248,.82); }}
+    .report-section.danger {{ background:linear-gradient(180deg,#fff8f7,#fffdf8); border-color:#fecdca; }}
+    .report-section.warning {{ background:linear-gradient(180deg,#fffbeb,#fffdf8); border-color:#fedf89; }}
+    .report-section.positive {{ background:linear-gradient(180deg,#f0fdf4,#fffdf8); border-color:#abefc6; }}
+    h2 {{ margin:0 0 8px; font-size:24px; line-height:1.2; letter-spacing:0; }}
+    .section-lead {{ color:#344054; margin:0 0 14px; font-weight:650; }}
+    ul {{ margin:0; padding-left:20px; }} li {{ margin:7px 0; }}
+    table {{ width:100%; border-collapse:collapse; margin-top:12px; font-size:14px; }}
+    td {{ padding:8px 10px; border-bottom:1px solid var(--line); }} td:last-child {{ text-align:right; font-variant-numeric:tabular-nums; }}
+    .footer {{ margin-top:46px; padding:28px; background:#111827; color:#fff; border-radius:24px; }}
+    .footer p {{ margin:0; color:#d0d5dd; }}
+    @media (max-width:860px) {{
+      main {{ padding:18px 12px 48px; }} .topnav {{ border-radius:18px; justify-content:flex-start; }}
+      .hero, .layout {{ grid-template-columns:1fr; }} .toc {{ position:relative; top:auto; border-left:0; padding-left:0; display:grid; grid-template-columns:repeat(2,1fr); gap:8px; }}
+      .bento {{ grid-template-columns:1fr; }} .span-6,.span-3,.span-4,.span-8 {{ grid-column:span 1; }}
+    }}
   </style>
 </head>
 <body>
 <main>
-  <header>
-    <h1>每日交易教练报告</h1>
-    <p class="note">{e(report['scope'])}</p>
-    <p class="note">交易日期：{e(report.get('trade_date', '无法判断'))}</p>
+  <nav class="topnav">{nav_html}</nav>
+  <header class="hero">
+    <div>
+      <h1>每日交易教练报告</h1>
+      <p>{e(report['scope'])}</p>
+      <p>{badge('交易日期 ' + str(report.get('trade_date', '无法判断')), 'neutral')} {badge('不荐股', 'warning')} {badge('不预测涨跌', 'warning')}</p>
+    </div>
+    <aside class="hero-panel">
+      <p class="eyebrow">今日定性</p>
+      <p class="value">{e(report['today_qualitative'])}</p>
+    </aside>
   </header>
-  {sections}
+  <section class="bento">
+    <article class="card span-6"><p class="eyebrow">今日定性</p><p class="value">{e(report['today_qualitative'])}</p></article>
+    <article class="card span-3"><p class="eyebrow">市场环境</p><p class="value">{e(report.get('market_regime','无法判断'))}</p></article>
+    <article class="card span-3"><p class="eyebrow">风险偏好</p><p class="value">{e(report.get('risk_appetite','无法判断'))}</p></article>
+    <article class="card span-4"><p class="eyebrow">今日最关键行为标签</p><p class="value">{e(report.get('primary_behavior_tag','无法判断'))}</p></article>
+    <article class="card span-8"><p class="eyebrow">明日唯一纪律</p><p class="value">{e(tomorrow_unique)}</p></article>
+  </section>
+  <div class="layout">
+    <aside class="toc">{nav_html}</aside>
+    <div>
+      <section class="report-section">
+        <h2>核心指标</h2>
+        <p class="section-lead">成交事实压缩表，数字右对齐便于扫读。</p>
+        <table>{facts_rows}</table>
+      </section>
+      {sections}
+    </div>
+  </div>
+  <footer class="footer"><p>本报告只做历史复盘、行为诊断和风控训练。所有明日计划均为条件纪律，不构成投资建议。</p></footer>
 </main>
 </body>
 </html>
@@ -429,6 +593,7 @@ def main():
     parser.add_argument("--playbooks", default="local_state/playbooks.json")
     parser.add_argument("--guard", default="pre_trade_guard.json")
     parser.add_argument("--macro-lenses", default="local_state/macro_lenses.json")
+    parser.add_argument("--market-context", default="market_context.json")
     parser.add_argument("--json-output", default="daily_coach_report.json")
     parser.add_argument("--markdown-output", default="daily_coach_report.md")
     parser.add_argument("--html-output", default="daily_coach_report.html")
@@ -445,6 +610,7 @@ def main():
         load_json(args.playbooks, {}),
         load_json(args.guard, {}),
         load_json(args.macro_lenses, {}),
+        load_json(args.market_context, {}),
     )
     Path(args.json_output).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     Path(args.markdown_output).write_text(to_markdown(report), encoding="utf-8")

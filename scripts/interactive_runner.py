@@ -31,6 +31,8 @@ ALLOWED_CODEX_READ_FILES = [
     "sanitized_trades.csv",
     "sanitized_trades_all.csv",
     "sanitized_trades_deduped.csv",
+    "pasted_trades_extracted.csv",
+    "pasted_trades_parse_report.json",
     "privacy_guard_report.json",
     "cleaned_trades.csv",
     "metrics.json",
@@ -46,6 +48,7 @@ ALLOWED_CODEX_READ_FILES = [
     "daily_coach_report.html",
     "daily_xueqiu_post.md",
     "daily_xueqiu_post.html",
+    "market_context.json",
     "playbooks.json",
     "pre_trade_guard.json",
     "macro_lenses.json",
@@ -541,6 +544,7 @@ def build_journal_input(fields):
         "trade_date": fields.get("trade_date", ""),
         "trading_idea": fields.get("trading_idea", ""),
         "trade_intent": fields.get("trade_intent", ""),
+        "market_view": fields.get("market_view", ""),
         "mood": fields.get("mood", ""),
         "plan": fields.get("plan", ""),
         "review_note": fields.get("review_note", ""),
@@ -549,17 +553,58 @@ def build_journal_input(fields):
     }
 
 
+def parse_pasted_trade_text(fields, run_dir):
+    pasted_text = (fields.get("pasted_trades_text") or "").strip()
+    if not pasted_text:
+        return None
+    raw_path = run_dir / "raw_pasted_trades.txt"
+    extracted = run_dir / "pasted_trades_extracted.csv"
+    parse_report = run_dir / "pasted_trades_parse_report.json"
+    privacy_report = run_dir / "pasted_trades_privacy_guard_report.json"
+    cleaned = run_dir / "pasted_trades_cleaned.csv"
+    cleaned_privacy = run_dir / "pasted_trades_cleaned_privacy_guard_report.json"
+    mapping = run_dir / "pasted_trades_field_mapping_suggestions.json"
+
+    raw_path.write_text(pasted_text, encoding="utf-8")
+    trade_date = fields.get("trade_date", "") or datetime.now().date().isoformat()
+    run_command([
+        PYTHON, str(SCRIPT_DIR / "parse_pasted_trades.py"),
+        str(raw_path), "-o", str(extracted), "--trade-date", trade_date, "--report", str(parse_report),
+    ])
+    run_command([PYTHON, str(SCRIPT_DIR / "privacy_guard.py"), str(extracted), "-o", str(privacy_report)])
+    run_command([PYTHON, str(SCRIPT_DIR / "parse_statement.py"), str(extracted), "-o", str(cleaned), "--suggestions-out", str(mapping)])
+    run_command([PYTHON, str(SCRIPT_DIR / "privacy_guard.py"), str(cleaned), "-o", str(cleaned_privacy)])
+    privacy_status, privacy_messages = load_privacy_summary(privacy_report)
+    return {
+        "file_id": "pasted_text",
+        "status": "ok",
+        "kind": "pasted_text",
+        "cleaned_path": str(cleaned),
+        "privacy_status": privacy_status,
+        "messages": privacy_messages,
+        "pasted_csv_path": str(extracted),
+        "parse_report_path": str(parse_report),
+    }
+
+
 def process_coach_request(fields, uploads, output_dir, state_dir):
-    if not uploads:
-        raise ProcessingError("未找到交易文件", ["请上传至少一个 PDF、CSV 或 XLSX。"])
+    pasted_text = (fields.get("pasted_trades_text") or "").strip()
+    if not uploads and not pasted_text:
+        raise ProcessingError("缺少交割单文本", ["请粘贴今日交割单文本；PDF、CSV、XLSX 上传是可选入口。"])
 
     base_output_dir = safe_output_dir(output_dir)
     state_dir = safe_output_dir(state_dir)
     run_name, run_dir = make_run_dir(base_output_dir)
-    messages = [f"收到 {len(uploads)} 个交易文件，使用内部编号 file_001 起处理。"]
+    messages = [f"收到粘贴交割单文本：{'是' if pasted_text else '否'}；上传文件数：{len(uploads)}。"]
 
     with tempfile.TemporaryDirectory(prefix="stock_coach_") as tmpdir:
-        file_results = [parse_uploaded_file(upload, tmpdir, run_dir) for upload in uploads]
+        file_results = []
+        if pasted_text:
+            try:
+                file_results.append(parse_pasted_trade_text(fields, run_dir))
+            except subprocess.CalledProcessError:
+                raise ProcessingError("粘贴交割单解析失败", ["请确认粘贴内容包含表头和成交记录，至少需要证券代码、证券名称、买卖方向、成交数量、成交价格。"])
+        file_results.extend(parse_uploaded_file(upload, tmpdir, run_dir) for upload in uploads)
         article_text = fields.get("article_text", "")
         article_text_path = Path(tmpdir) / "article_text.txt"
         if article_text:
@@ -572,14 +617,15 @@ def process_coach_request(fields, uploads, output_dir, state_dir):
         cleaned = run_dir / "cleaned_trades.csv"
         all_rows, deduped_rows = merge_cleaned_files(file_results, cleaned)
         merge_report = {
+            "pasted_text_used": bool(pasted_text),
             "uploaded_files": len(uploads),
             "success_count": success_count,
-            "failure_count": len(uploads) - success_count,
+            "failure_count": len(file_results) - success_count,
             "rows_before_dedupe": len(all_rows),
             "rows_after_dedupe": len(deduped_rows),
             "duplicate_rows_removed": len(all_rows) - len(deduped_rows),
             "file_results": [{k: v for k, v in item.items() if k not in {"cleaned_path"}} for item in file_results],
-            "note": "不记录原始文件名；每个文件仅使用内部编号。",
+            "note": "原始粘贴文本仅保存在 local_outputs/run_*；上传文件不记录原始文件名，每个文件仅使用内部编号。",
         }
         merge_report_path = run_dir / "merge_report.json"
         merge_report_path.write_text(json.dumps(merge_report, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -594,6 +640,7 @@ def process_coach_request(fields, uploads, output_dir, state_dir):
         playbooks = state_dir / "playbooks.json"
         playbooks_snapshot = run_dir / "playbooks.json"
         guard = run_dir / "pre_trade_guard.json"
+        market_context = run_dir / "market_context.json"
         macro_lenses = state_dir / "macro_lenses.json"
         coach_json = run_dir / "daily_coach_report.json"
         coach_md = run_dir / "daily_coach_report.md"
@@ -618,10 +665,11 @@ def process_coach_request(fields, uploads, output_dir, state_dir):
             [PYTHON, str(SCRIPT_DIR / "detect_behavior_patterns.py"), str(cleaned), str(metrics), str(lifecycle), "-o", str(behavior)],
             [PYTHON, str(SCRIPT_DIR / "counterfactual_simulator.py"), str(metrics), str(lifecycle), "-o", str(counterfactual)],
             [PYTHON, str(SCRIPT_DIR / "daily_journal.py"), "--input-json", str(journal_input), "-o", str(journal)],
+            [PYTHON, str(SCRIPT_DIR / "market_context_analyzer.py"), "--trade-date", build_journal_input(fields).get("trade_date") or datetime.now().date().isoformat(), "--user-view", fields.get("market_view", ""), "-o", str(market_context)],
             article_args,
             [PYTHON, str(SCRIPT_DIR / "playbook_manager.py"), "--metrics", str(metrics), "--lifecycle", str(lifecycle), "--behavior", str(behavior), "--journal", str(journal), "--state", str(playbooks)],
             [PYTHON, str(SCRIPT_DIR / "pre_trade_guard.py"), "--playbooks", str(playbooks), "--behavior", str(behavior), "-o", str(guard)],
-            [PYTHON, str(SCRIPT_DIR / "generate_coach_report.py"), "--metrics", str(metrics), "--lifecycle", str(lifecycle), "--behavior", str(behavior), "--journal", str(journal), "--article", str(article), "--playbooks", str(playbooks), "--guard", str(guard), "--macro-lenses", str(macro_lenses), "--json-output", str(coach_json), "--markdown-output", str(coach_md), "--html-output", str(coach_html), "--xueqiu-markdown-output", str(xueqiu_md), "--xueqiu-html-output", str(xueqiu_html)],
+            [PYTHON, str(SCRIPT_DIR / "generate_coach_report.py"), "--metrics", str(metrics), "--lifecycle", str(lifecycle), "--behavior", str(behavior), "--journal", str(journal), "--article", str(article), "--playbooks", str(playbooks), "--guard", str(guard), "--macro-lenses", str(macro_lenses), "--market-context", str(market_context), "--json-output", str(coach_json), "--markdown-output", str(coach_md), "--html-output", str(coach_html), "--xueqiu-markdown-output", str(xueqiu_md), "--xueqiu-html-output", str(xueqiu_html)],
         ]
         try:
             for step in steps:
@@ -634,7 +682,7 @@ def process_coach_request(fields, uploads, output_dir, state_dir):
         shutil.copy2(coach_html, stable_coach_html)
         shutil.copy2(xueqiu_html, stable_xueqiu_html)
 
-    messages.append(f"上传文件数：{len(uploads)}，成功：{success_count}，失败：{len(uploads) - success_count}。")
+    messages.append(f"粘贴文本：{'已解析' if pasted_text else '未使用'}；上传文件数：{len(uploads)}，成功输入源：{success_count}，失败：{len(file_results) - success_count}。")
     messages.append(f"去重前行数：{len(all_rows)}，去重后行数：{len(deduped_rows)}，删除重复行：{len(all_rows) - len(deduped_rows)}。")
     messages.append("PDF、CSV、XLSX 均只在本机处理；原始上传文件已从系统临时目录删除。")
     messages.append("每日教练报告不荐股、不预测涨跌、不输出买卖建议。")
@@ -648,8 +696,10 @@ def process_coach_request(fields, uploads, output_dir, state_dir):
         "paths": {
             "cleaned_trades": str(cleaned),
             "merge_report": str(merge_report_path),
+            "pasted_trades": str(run_dir / "pasted_trades_extracted.csv") if pasted_text else "",
             "daily_journal": str(journal),
             "article_digest": str(article),
+            "market_context": str(market_context),
             "playbooks": str(playbooks),
             "pre_trade_guard": str(guard),
             "html_report": str(coach_html),
