@@ -176,8 +176,11 @@ def coach_reason_lines(summary, behavior, journal, digest, macro_lenses):
         lines.append(f"交易事实依据：今日有 {total_trades} 笔成交，因此判断先看行为质量，再看结果盈亏。")
     pnl = summary.get("realized_pnl")
     if isinstance(pnl, (int, float)):
-        direction = "为正" if pnl >= 0 else "为负"
-        lines.append(f"结果依据：已实现盈亏{direction}，但单日结果不能证明模式可复制。")
+        if abs(pnl) < 1e-9:
+            lines.append("结果依据：已实现盈亏为 0 或成本无法完整匹配，不能解读为盈利。")
+        else:
+            direction = "为正" if pnl > 0 else "为负"
+            lines.append(f"结果依据：已实现盈亏{direction}，但单日结果不能证明模式可复制。")
     triggered = [
         name for name, item in behavior.get("behavior_flags", {}).items()
         if item.get("status") == "触发"
@@ -255,6 +258,59 @@ def reusable_mode(playbooks):
     return ["无法判断"]
 
 
+def coach_lens_lines(coach_lens):
+    if not coach_lens:
+        return ["无法判断：未生成双镜片教练判断。"]
+    lines = []
+    lines.append(coach_lens.get("today_verdict", "无法判断"))
+    for line in coach_lens.get("shared_conclusion", [])[:3]:
+        lines.append(line)
+    return lines or ["无法判断"]
+
+
+def dongge_lens_lines(coach_lens):
+    if not coach_lens:
+        return ["无法判断"]
+    return coach_lens.get("dongge_lens") or ["无法判断"]
+
+
+def bingbing_lens_lines(coach_lens):
+    if not coach_lens:
+        return ["无法判断"]
+    return coach_lens.get("bingbing_lens") or ["无法判断"]
+
+
+def stock_guidance_lines(coach_lens):
+    if not coach_lens:
+        return ["无法判断"]
+    rows = []
+    for item in coach_lens.get("stock_reviews", []):
+        rows.append(
+            f"{item.get('security', '无法判断')}｜{item.get('buy_point_type', '无法判断')}｜{item.get('hard_judgment', '无法判断')} "
+            f"触发：{item.get('trigger_condition', '无法判断')} 止损：{item.get('stop_anchor', '无法判断')} "
+            f"禁止：{item.get('forbidden_condition', '无法判断')}"
+        )
+    return rows or ["无法判断"]
+
+
+def candidate_pool_lines(candidate_pool):
+    if not candidate_pool:
+        return ["无法判断：未生成研究候选池。"]
+    if candidate_pool.get("status") != "ok":
+        return [
+            candidate_pool.get("message", "无法生成研究候选池。"),
+            "需要格式：" + candidate_pool.get("required_format", "每行包含代码、名称、题材、位置、量能、止损线索。"),
+        ]
+    lines = [candidate_pool.get("message", "基于候选池生成研究预案。")]
+    for item in candidate_pool.get("candidates", [])[:5]:
+        lines.append(
+            f"{item.get('security', '无法判断')}｜研究分数 {item.get('research_score', '无法判断')}｜{item.get('buy_point_type', '无法判断')}｜"
+            f"触发：{item.get('trigger_condition', '无法判断')}｜止损：{item.get('stop_anchor', '无法判断')}｜"
+            f"禁止：{item.get('forbidden_condition', '无法判断')}｜懂哥质疑：{item.get('dongge_challenge', '无法判断')}｜小美风险：{item.get('bingbing_risk', '无法判断')}"
+        )
+    return lines
+
+
 def primary_behavior_tag(behavior):
     triggered = [
         name for name, item in behavior.get("behavior_flags", {}).items()
@@ -263,12 +319,16 @@ def primary_behavior_tag(behavior):
     return triggered[0] if triggered else "无明显触发"
 
 
-def build_report(metrics, lifecycle, behavior, journal, digest, playbooks, guard, macro_lenses=None, market_context=None):
+def build_report(metrics, lifecycle, behavior, journal, digest, playbooks, guard, macro_lenses=None, market_context=None, coach_lens=None, candidate_pool=None):
     macro_lenses = macro_lenses or {}
     market_context = market_context or {}
+    coach_lens = coach_lens or {}
+    candidate_pool = candidate_pool or {}
     summary = metrics.get("summary", {})
     per_stock = metrics.get("per_stock_pnl", {})
-    tomorrow_plan = tomorrow_plan_lines(journal, behavior, playbooks, guard)
+    lens_conclusion = coach_lens.get("shared_conclusion", [])
+    tomorrow_plan = (lens_conclusion[:3] if lens_conclusion else tomorrow_plan_lines(journal, behavior, playbooks, guard))
+    today_qual = coach_lens.get("today_verdict") or qualitative(summary, behavior, journal, digest)
     payload = {
         "scope": "只做历史复盘、行为诊断和风控训练；不荐股、不预测涨跌、不输出买卖建议。",
         "trade_date": journal.get("trade_date", "无法判断"),
@@ -291,12 +351,17 @@ def build_report(metrics, lifecycle, behavior, journal, digest, playbooks, guard
             f"交易意图：{journal.get('trade_intent') or '无法判断'}",
             f"情绪状态：{journal.get('mood') or '无法判断'}",
         ],
-        "today_qualitative": qualitative(summary, behavior, journal, digest),
+        "today_qualitative": today_qual,
         "coach_reasoning": coach_reason_lines(summary, behavior, journal, digest, macro_lenses),
         "done_well": done_well(summary, behavior),
         "risk_behaviors": triggered_behavior(behavior),
         "article_influence": article_lines(digest),
         "macro_lens": macro_lens_lines(macro_lenses),
+        "coach_lens_summary": coach_lens_lines(coach_lens),
+        "dongge_lens": dongge_lens_lines(coach_lens),
+        "bingbing_lens": bingbing_lens_lines(coach_lens),
+        "stock_guidance": stock_guidance_lines(coach_lens),
+        "candidate_pool": candidate_pool_lines(candidate_pool),
         "tomorrow_discipline": tomorrow_plan,
         "reusable_mode": reusable_mode(playbooks),
     }
@@ -328,6 +393,11 @@ def to_markdown(report):
         markdown_section("T 交易分析", report["t_trade_analysis"]),
         markdown_section("今日交易意图", report["today_intent"]),
         markdown_section("今日定性", [report["today_qualitative"]]),
+        markdown_section("双镜片教练判断", report["coach_lens_summary"]),
+        markdown_section("懂哥短线镜片", report["dongge_lens"]),
+        markdown_section("冰冰小美宏观镜片", report["bingbing_lens"]),
+        markdown_section("买点教练卡", report["stock_guidance"]),
+        markdown_section("研究候选池", report["candidate_pool"]),
         markdown_section("教练判断理由", report["coach_reasoning"]),
         markdown_section("做得好的地方", report["done_well"]),
         markdown_section("风险行为", report["risk_behaviors"]),
@@ -362,6 +432,9 @@ def to_html(report):
     nav = [
         ("facts", "今日交易事实"),
         ("market-correction", "市场判断校正"),
+        ("coach-lens", "双镜片判断"),
+        ("buy-point", "买点教练卡"),
+        ("candidate-pool", "研究候选池"),
         ("single-stock", "单票复盘"),
         ("t-trade", "T 交易分析"),
         ("risk", "风险行为"),
@@ -376,6 +449,11 @@ def to_html(report):
     sections = "\n".join([
         section_html("facts", "今日交易事实", "先看成交事实，再讨论动机和市场叙事。", report["today_facts"]),
         section_html("market-correction", "市场判断校正", "市场环境由智能体独立判断，用户判断只作为待校正输入。", report["market_correction"], "warning"),
+        section_html("coach-lens", "双镜片教练判断", "懂哥负责短线买点和风控，小美负责宏观节点、风格和仓位频率约束。", report["coach_lens_summary"], "warning"),
+        section_html("dongge-lens", "懂哥短线镜片", "先环境、再题材、再个股、再买点；买点必须能写出失败条件。", report["dongge_lens"]),
+        section_html("bingbing-lens", "冰冰小美宏观镜片", "宏观镜片只约束仓位和频率，不替代个股止损。", report["bingbing_lens"]),
+        section_html("buy-point", "买点教练卡", "硬判断 + 条件句：分类、触发、止损、禁止动作必须同时出现。", report["stock_guidance"], "danger"),
+        section_html("candidate-pool", "研究候选池", "默认不硬编股票；没有联网候选或用户候选池时，明确无法生成。", report["candidate_pool"], "warning"),
         section_html("single-stock", "单票复盘", "单票结果只代表历史成交，不证明模式已经可复制。", report["per_stock_review"]),
         section_html("t-trade", "T 交易分析", "正 T / 负 T 只用于复盘执行质量，不作为未来涨跌判断。", report["t_trade_analysis"], "danger" if any("负 T" in line for line in report["t_trade_analysis"]) else "neutral"),
         section_html("risk", "风险行为", "先处理最危险的行为标签，再谈下一笔机会。", report["risk_behaviors"], "danger"),
@@ -518,6 +596,12 @@ def build_xueqiu_post(report, metrics, journal):
     lines.extend(f"- {line}" for line in stock_action_lines(metrics))
     lines.extend(["", "## 今日定性"])
     lines.append(f"- {report.get('today_qualitative', '无法判断')}")
+    lines.extend(["", "## 双镜片教练判断"])
+    lines.extend(f"- {line}" for line in report.get("coach_lens_summary", []))
+    lines.extend(["", "## 买点教练卡"])
+    lines.extend(f"- {line}" for line in report.get("stock_guidance", []))
+    lines.extend(["", "## 研究候选池"])
+    lines.extend(f"- {line}" for line in report.get("candidate_pool", []))
     lines.extend(["", "## 教练判断与理由"])
     lines.extend(f"- {line}" for line in report.get("coach_reasoning", []))
     lines.extend(["", "## 明日计划"])
@@ -596,6 +680,8 @@ def main():
     parser.add_argument("--guard", default="pre_trade_guard.json")
     parser.add_argument("--macro-lenses", default="local_state/macro_lenses.json")
     parser.add_argument("--market-context", default="market_context.json")
+    parser.add_argument("--coach-lens", default="coach_lens.json")
+    parser.add_argument("--candidate-pool", default="candidate_pool.json")
     parser.add_argument("--json-output", default="daily_coach_report.json")
     parser.add_argument("--markdown-output", default="daily_coach_report.md")
     parser.add_argument("--html-output", default="daily_coach_report.html")
@@ -613,6 +699,8 @@ def main():
         load_json(args.guard, {}),
         load_json(args.macro_lenses, {}),
         load_json(args.market_context, {}),
+        load_json(args.coach_lens, {}),
+        load_json(args.candidate_pool, {}),
     )
     Path(args.json_output).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     Path(args.markdown_output).write_text(to_markdown(report), encoding="utf-8")

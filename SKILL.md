@@ -19,6 +19,8 @@ description: Daily Chinese stock trading coach agent for user-provided historica
 - 支持用户填写“我对今日市场的判断”；该判断只作为待校正输入，智能体必须独立判断市场环境并评价用户判断。
 - 支持文章 URL 或粘贴文章文本；URL 可联网抓取，但长期只保存摘要和叙事污染检查，不保存全文。
 - 支持手动更新宏观镜片，例如冰冰小美雪球主页；宏观镜片只用于市场环境观察和教练提问。
+- 支持读取本地懂哥方法蒸馏与冰冰小美宏观蒸馏，生成“双镜片教练判断”和“买点教练卡”。
+- 支持粘贴候选池/强势榜文本。第一阶段不硬编全市场候选；没有联网候选或用户候选池时，明确写无法生成研究候选池。
 - 截图成交单仅在用户显式上传给 Codex 识别时使用 AI 抽取标准 trades；建议先裁剪或打码身份、账号、资金余额。
 
 ## 工作流
@@ -26,7 +28,7 @@ description: Daily Chinese stock trading coach agent for user-provided historica
 1. 本地交互：`python3 scripts/interactive_runner.py --open`
 2. 粘贴今日交割单文本，填写交易想法、市场判断、文章信息和情绪标签。
 3. 本地完成隐私检查、标准化解析、交易统计、行为诊断和反事实模拟。
-4. 生成 `daily_journal.json`、`article_digest.json`、`market_context.json`、`pre_trade_guard.json`。
+4. 生成 `daily_journal.json`、`article_digest.json`、`market_context.json`、`coach_lens.json`、`candidate_pool.json`、`pre_trade_guard.json`。
 5. 保守更新 `local_state/playbooks.json`。
 6. 智能体优先基于公开行情信息独立判断市场环境；联网失败时标注“市场背景未联网验证”。
 7. 读取可选 `local_state/macro_lenses.json`，生成市场情况判断、用户判断校正和教练判断理由。
@@ -71,6 +73,8 @@ python3 scripts/macro_lens_digest.py --source xueqiu --user-url "https://xueqiu.
 - `daily_journal.json`
 - `article_digest.json`
 - `market_context.json`
+- `coach_lens.json`
+- `candidate_pool.json`
 - `pre_trade_guard.json`
 - `daily_coach_report.json`
 - `daily_coach_report.md`
@@ -99,6 +103,8 @@ python3 scripts/macro_lens_digest.py --source xueqiu --user-url "https://xueqiu.
 - 明日计划必须写成条件触发式纪律，不能写确定性动作。
 - 市场情况判断必须以智能体独立校验为主，用户判断只作为待校正输入；证据不足时写 `无法判断` 或“市场背景未联网验证”。
 - 用户市场判断必须被专业评价：哪些对、哪些过度归因、缺少哪些信息、对应交易动作应如何更保守。
+- 买点指导必须使用“硬判断 + 条件句”：买点分类、触发条件、止损锚点、禁止动作同时出现。
+- 候选池默认不硬编；第一阶段没有候选池数据时，必须要求用户粘贴强势榜或候选池。
 - 所有结论必须基于用户提供的历史成交、当天想法和文章观点。
 - 数据不足时必须写 `无法判断`。
 - 稳定盈利定义为寻找可重复、可验证、风险可控的交易模式，而不是预测未来。

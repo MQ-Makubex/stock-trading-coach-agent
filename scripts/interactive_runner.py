@@ -49,6 +49,8 @@ ALLOWED_CODEX_READ_FILES = [
     "daily_xueqiu_post.md",
     "daily_xueqiu_post.html",
     "market_context.json",
+    "coach_lens.json",
+    "candidate_pool.json",
     "playbooks.json",
     "pre_trade_guard.json",
     "macro_lenses.json",
@@ -641,6 +643,9 @@ def process_coach_request(fields, uploads, output_dir, state_dir):
         playbooks_snapshot = run_dir / "playbooks.json"
         guard = run_dir / "pre_trade_guard.json"
         market_context = run_dir / "market_context.json"
+        coach_lens = run_dir / "coach_lens.json"
+        candidate_pool = run_dir / "candidate_pool.json"
+        candidate_text_path = Path(tmpdir) / "candidate_pool_text.txt"
         macro_lenses = state_dir / "macro_lenses.json"
         coach_json = run_dir / "daily_coach_report.json"
         coach_md = run_dir / "daily_coach_report.md"
@@ -651,6 +656,8 @@ def process_coach_request(fields, uploads, output_dir, state_dir):
         stable_xueqiu_html = base_output_dir / "daily_xueqiu_post.html"
 
         journal_input.write_text(json.dumps(build_journal_input(fields), ensure_ascii=False, indent=2), encoding="utf-8")
+        if fields.get("candidate_pool_text"):
+            candidate_text_path.write_text(fields.get("candidate_pool_text", ""), encoding="utf-8")
         article_args = [PYTHON, str(SCRIPT_DIR / "article_digest.py"), "--journal-json", str(journal), "-o", str(article)]
         if fields.get("article_url"):
             article_args.extend(["--url", fields.get("article_url", "")])
@@ -669,7 +676,9 @@ def process_coach_request(fields, uploads, output_dir, state_dir):
             article_args,
             [PYTHON, str(SCRIPT_DIR / "playbook_manager.py"), "--metrics", str(metrics), "--lifecycle", str(lifecycle), "--behavior", str(behavior), "--journal", str(journal), "--state", str(playbooks)],
             [PYTHON, str(SCRIPT_DIR / "pre_trade_guard.py"), "--playbooks", str(playbooks), "--behavior", str(behavior), "-o", str(guard)],
-            [PYTHON, str(SCRIPT_DIR / "generate_coach_report.py"), "--metrics", str(metrics), "--lifecycle", str(lifecycle), "--behavior", str(behavior), "--journal", str(journal), "--article", str(article), "--playbooks", str(playbooks), "--guard", str(guard), "--macro-lenses", str(macro_lenses), "--market-context", str(market_context), "--json-output", str(coach_json), "--markdown-output", str(coach_md), "--html-output", str(coach_html), "--xueqiu-markdown-output", str(xueqiu_md), "--xueqiu-html-output", str(xueqiu_html)],
+            [PYTHON, str(SCRIPT_DIR / "coach_lens_analyzer.py"), "--metrics", str(metrics), "--lifecycle", str(lifecycle), "--behavior", str(behavior), "--journal", str(journal), "--market-context", str(market_context), "--macro-lenses", str(macro_lenses), "--playbooks", str(playbooks), "--dongge-distillation", str(state_dir / "dongge_weekend_fantang_distillation.md"), "--bingbing-distillation", str(state_dir / "bingbingxiaomei_macro_distillation.md"), "--prior-context", str(state_dir / f"intraday_journal_{build_journal_input(fields).get('trade_date') or datetime.now().date().isoformat()}.md"), "-o", str(coach_lens)],
+            [PYTHON, str(SCRIPT_DIR / "candidate_pool_analyzer.py"), "--market-context", str(market_context), "--candidate-text-file", str(candidate_text_path), "-o", str(candidate_pool)],
+            [PYTHON, str(SCRIPT_DIR / "generate_coach_report.py"), "--metrics", str(metrics), "--lifecycle", str(lifecycle), "--behavior", str(behavior), "--journal", str(journal), "--article", str(article), "--playbooks", str(playbooks), "--guard", str(guard), "--macro-lenses", str(macro_lenses), "--market-context", str(market_context), "--coach-lens", str(coach_lens), "--candidate-pool", str(candidate_pool), "--json-output", str(coach_json), "--markdown-output", str(coach_md), "--html-output", str(coach_html), "--xueqiu-markdown-output", str(xueqiu_md), "--xueqiu-html-output", str(xueqiu_html)],
         ]
         try:
             for step in steps:
@@ -700,6 +709,8 @@ def process_coach_request(fields, uploads, output_dir, state_dir):
             "daily_journal": str(journal),
             "article_digest": str(article),
             "market_context": str(market_context),
+            "coach_lens": str(coach_lens),
+            "candidate_pool": str(candidate_pool),
             "playbooks": str(playbooks),
             "pre_trade_guard": str(guard),
             "html_report": str(coach_html),

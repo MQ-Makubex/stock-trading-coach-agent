@@ -16,6 +16,11 @@ OUTPUT_FIELDS = [
     "quantity",
     "price",
     "amount",
+    "net_amount",
+    "commission",
+    "stamp_tax",
+    "transfer_fee",
+    "other_fee",
 ]
 
 ALIASES = {
@@ -26,6 +31,11 @@ ALIASES = {
     "quantity": ["成交数量", "成交股数", "数量", "股数", "quantity", "qty"],
     "price": ["成交价格", "成交均价", "成交价", "价格", "price"],
     "amount": ["成交金额", "成交额", "发生金额", "总发生金额", "amount"],
+    "net_amount": ["发生金额", "总发生金额", "资金发生额", "net_amount", "cash_amount"],
+    "commission": ["佣金", "手续费", "交易佣金", "commission"],
+    "stamp_tax": ["印花税", "stamp_tax"],
+    "transfer_fee": ["过户费", "transfer_fee"],
+    "other_fee": ["交易规费", "规费", "其他费用", "经手费", "证管费", "other_fee"],
 }
 
 REQUIRED = ["stock_code", "stock_name", "side", "quantity", "price"]
@@ -148,6 +158,11 @@ def parse_lines(text, trade_date):
                 "quantity": quantity,
                 "price": price,
                 "amount": amount,
+                "net_amount": clean_number(get(cells, mapping, "net_amount")),
+                "commission": clean_number(get(cells, mapping, "commission")),
+                "stamp_tax": clean_number(get(cells, mapping, "stamp_tax")),
+                "transfer_fee": clean_number(get(cells, mapping, "transfer_fee")),
+                "other_fee": clean_number(get(cells, mapping, "other_fee")),
                 "_source_line": line_no,
             }
         )

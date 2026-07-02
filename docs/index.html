@@ -34,6 +34,8 @@
       <div class="card">记录 daily journal：当天交易想法、意图、情绪和计划。</div>
       <div class="card">提取文章观点并检查叙事污染。</div>
       <div class="card">手动蒸馏宏观博主观点，形成市场环境观察镜片。</div>
+      <div class="card">读取懂哥短线方法与冰冰小美宏观镜片，生成双镜片教练判断。</div>
+      <div class="card">生成买点教练卡：买点分类、触发条件、止损锚点、禁止动作。</div>
       <div class="card">生成每日 HTML、Markdown 和 JSON 教练报告。</div>
       <div class="card">生成可发雪球的每日复盘与明日计划草稿。</div>
       <div class="card">保守沉淀 playbooks.json：可复制、待验证、应避免。</div>
@@ -62,6 +64,17 @@
 1       09:40:15    301171     易点天下    证券买入    1500      34.900      52350.000</pre>
     <p>最终报告在 <code>local_outputs/run_时间戳/daily_coach_report.html</code>，稳定入口为 <code>local_outputs/daily_coach_report.html</code>。</p>
     <p>雪球发布版在 <code>local_outputs/run_时间戳/daily_xueqiu_post.html</code>，稳定入口为 <code>local_outputs/daily_xueqiu_post.html</code>。</p>
+  </section>
+
+  <section>
+    <h2>双镜片和买点指导</h2>
+    <ul>
+      <li>懂哥镜片权重 80%，负责题材强度、技术位置、量能主动性、风险可定义和交易节点。</li>
+      <li>冰冰小美镜片权重 20%，负责风格匹配、外部风险和叙事拥挤度约束。</li>
+      <li>报告使用“硬判断 + 条件句”，不会只写“可以观察”。</li>
+      <li>每只已交易股票会输出买点分类、触发条件、止损锚点和禁止动作。</li>
+      <li>研究候选池第一阶段不硬编。若未粘贴候选池或强势榜，报告会明确写无法生成。</li>
+    </ul>
   </section>
 
   <section>
